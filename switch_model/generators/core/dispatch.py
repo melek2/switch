@@ -135,8 +135,22 @@ def define_components(mod):
     generators that implement Carbon Capture and Sequestration. This does
     not yet support multi-fuel generators.
 
+    DispatchPM25[(g, t, f) in GEN_TP_FUELS] is the PM2.5 emissions
+    produced by dispatching a fuel-based project in units of mass of
+    PM2.5 per hour. This is derived from the fuel consumption
+    GenFuelUseRate, the fuel's PM2.5 intensity factor f_pm25_intensity,
+    and (optionally) any capture efficiency for generators equipped for
+    particulate capture. This does not yet support multi-fuel generators.
+
     AnnualEmissions[p in PERIODS]:The system's annual emissions, in metric
     tonnes of CO2 per year.
+
+    AnnualPM25[p in PERIODS]: is the system’s annual PM2.5 emissions, in 
+    metric tonnes of PM2.5 per year. 
+
+    Calculated by summing DispatchPM25[g, t, f] * tp_weight_in_year[t] for
+    all generators, fuels, and timepoints t in period p.
+
 
     --- Delayed implementation, possibly relegated to other modules. ---
 
@@ -372,6 +386,33 @@ def define_components(mod):
         doc="The system's annual emissions, in metric tonnes of CO2 per year.",
     )
 
+    def DispatchPM25_rule(m, g, t, f):
+        # if there is ever a PM2.5 capture parameter, we can include it here
+        # if g in m.PM_CAPTURE_EQUIPPED_GENS:
+        #     capture_frac = 1 - m.gen_pm_capture_efficiency[g]
+        # else:
+        #     capture_frac = 1
+        # return m.GenFuelUseRate[g, t, f] * m.f_pm25_intensity[f] * capture_frac
+
+        # simplest no-capture version
+        return m.GenFuelUseRate[g, t, f] * m.f_pm25_intensity[f]
+
+    mod.DispatchPM25 = Expression(
+        mod.GEN_TP_FUELS,
+        rule=DispatchPM25_rule,
+        doc="PM2.5 emissions (mass per hour) from each generator, fuel, and timepoint."
+    )
+
+    mod.AnnualPM25 = Expression(
+        mod.PERIODS,
+        rule=lambda m, period: sum(
+            m.DispatchPM25[g, t, f] * m.tp_weight_in_year[t]
+            for (g, t, f) in m.GEN_TP_FUELS
+            if m.tp_period[t] == period
+        ),
+        doc="The system's annual PM2.5 emissions in metric tonnes of PM2.5 per year."
+    )
+
     mod.GenVariableOMCostsInTP = Expression(
         mod.TIMEPOINTS,
         rule=lambda m, t: sum(
@@ -473,6 +514,20 @@ def post_solve(instance, outdir):
                 if instance.gen_uses_fuel[g]
                 else 0
             ),
+            "DispatchPM25_g_per_hr": (
+                value(
+                    sum(instance.DispatchPM25[g, t, f]
+                        for f in instance.FUELS_FOR_GEN[g])
+                    )
+                if instance.gen_uses_fuel[g] else 0.0
+            ),
+            "DispatchPM25_g_per_typical_yr": (
+                value(
+                    sum(instance.DispatchPM25[g, t, f] * instance.tp_weight_in_year[t]
+                        for f in instance.FUELS_FOR_GEN[g])
+                )
+                if instance.gen_uses_fuel[g] else 0.0
+            ), 
             "GenCapacity_MW": value(instance.GenCapacity[g, p]),
             "GenCapitalCosts": value(instance.GenCapitalCosts[g, p]),
             "GenFixedOMCosts": value(instance.GenFixedOMCosts[g, p]),
@@ -504,6 +559,8 @@ def post_solve(instance, outdir):
         "Energy_GWh_typical_yr",
         "VariableCost_per_yr",
         "DispatchEmissions_tCO2_per_typical_yr",
+        "DispatchPM25_g_per_typical_yr",
+        "GenCapacity_MW",
         "GenCapacity_MW",
         "GenCapitalCosts",
         "GenFixedOMCosts",
