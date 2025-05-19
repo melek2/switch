@@ -402,15 +402,17 @@ def define_components(mod):
         rule=DispatchPM25_rule,
         doc="PM2.5 emissions (mass per hour) from each generator, fuel, and timepoint."
     )
-
-    mod.AnnualPM25 = Expression(
-        mod.PERIODS,
-        rule=lambda m, period: sum(
+    def annual_pm25_rule(m, period):
+        return sum(
             m.DispatchPM25[g, t, f] * m.tp_weight_in_year[t]
             for (g, t, f) in m.GEN_TP_FUELS
             if m.tp_period[t] == period
-        ),
-        doc="The system's annual PM2.5 emissions in metric tonnes of PM2.5 per year."
+        )
+
+    mod.AnnualPM25 = Expression(
+        mod.PERIODS,
+        rule=annual_pm25_rule,
+        doc="The system's annual PM2.5 emissions (in base mass units per year***)."
     )
 
     mod.GenVariableOMCostsInTP = Expression(
